@@ -4,6 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#0a1018" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Highlife Staff Toolkit</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -17,24 +19,26 @@
         <button class="nav" data-page="comp">▦ <span>Comp Calculator</span></button>
         <button class="nav" data-page="punishment">♢ <span>Punishment Guide</span></button>
         <button class="nav" data-page="players">♙ <span>Player Records</span></button>
+        <button class="nav" data-page="appeals">↺ <span>Appeal Review</span></button>
       </nav>
-      <div class="privacy"><span>●</span><div><strong>Private data protected</strong><small>Sensitive data will not be stored in this repo.</small></div></div>
+      <div class="privacy"><span>●</span><div><strong>Safe prototype mode</strong><small>No compensation prices or punishment recommendations are stored in this repo.</small></div></div>
     </aside>
 
     <main>
       <header><button id="menu" aria-label="Menu">☰</button><div><p class="eyebrow">PERSONAL STAFF WORKSPACE</p><h1 id="pageTitle">Dashboard</h1></div><div class="status">Private toolkit <span>●</span></div></header>
 
       <section class="page active" id="home">
-        <div class="welcome"><div><p class="eyebrow">HIGHLIFE STAFF DESK</p><h2>Welcome back, Kizzy.</h2><p>Rules, compensation, punishment guidance and player history — without digging through five different places.</p></div><div class="date" id="date"></div></div>
-        <div class="toolgrid">
+        <div class="welcome"><div><p class="eyebrow">HIGHLIFE STAFF DESK</p><h2>Welcome back, Kizzy.</h2><p>Rules, compensation, punishment history and appeal prep in one workspace.</p></div><div class="date" id="date"></div></div>
+        <div class="toolgrid five">
           <button class="tool purple" data-open="rules"><span class="icon">⚖</span><b>Rule Finder</b><small>Search or describe a situation and find relevant rules.</small><em>Open tool →</em></button>
           <button class="tool lime" data-open="comp"><span class="icon">▣</span><b>Comp Calculator</b><small>Calculate items, quantities, cash loss and compensation.</small><em>Open tool →</em></button>
-          <button class="tool gold" data-open="punishment"><span class="icon">♢</span><b>Punishment Guide</b><small>Review private guidance alongside prior punishment history.</small><em>Open tool →</em></button>
-          <button class="tool blue" data-open="players"><span class="icon">♙</span><b>Player Records</b><small>Keep profile links, punishment history, appeals and notes together.</small><em>Open tool →</em></button>
+          <button class="tool gold" data-open="punishment"><span class="icon">♢</span><b>Punishment Guide</b><small>Review an incident alongside prior punishment history.</small><em>Open tool →</em></button>
+          <button class="tool blue" data-open="players"><span class="icon">♙</span><b>Player Records</b><small>Profiles, punishments, evidence links and case notes.</small><em>Open tool →</em></button>
+          <button class="tool teal" data-open="appeals"><span class="icon">↺</span><b>Appeal Review</b><small>Pull a player's record together when a ban appeal arrives.</small><em>Open tool →</em></button>
         </div>
         <div class="dashboard-grid">
-          <article class="panel"><div class="panelhead"><h3>Quick actions</h3></div><button class="rowbtn" data-open="players">＋ Add player record</button><button class="rowbtn" data-open="punishment">♢ Start punishment review</button><button class="rowbtn" data-open="comp">▦ Open compensation calculator</button><button class="rowbtn" data-open="rules">⌕ Search rules</button></article>
-          <article class="panel"><div class="panelhead"><h3>Pinned rules</h3><span>Prototype</span></div><div class="empty compact">Pin the rules you reach for most often.</div></article>
+          <article class="panel"><div class="panelhead"><h3>Quick actions</h3></div><button class="rowbtn" id="quickNewPlayer">＋ Add player record</button><button class="rowbtn" data-open="punishment">♢ Start punishment review</button><button class="rowbtn" data-open="appeals">↺ Review an appeal</button><button class="rowbtn" data-open="comp">▦ Open compensation calculator</button></article>
+          <article class="panel"><div class="panelhead"><h3>Saved records</h3><span>On this device</span></div><div class="mini-stats"><div><b id="homePlayers">0</b><small>Players</small></div><div><b id="homeCases">0</b><small>Cases</small></div><div><b id="homeAppeals">0</b><small>Appeals</small></div></div><div class="prototype-note">Temporary browser storage only until the private backend is connected.</div></article>
           <article class="panel"><div class="panelhead"><h3>Recent activity</h3><button class="textbtn" id="clearRecent">Clear</button></div><div id="recentList" class="empty compact">Your recent searches and records will appear here.</div></article>
         </div>
       </section>
@@ -45,17 +49,17 @@
         <div class="rule-layout">
           <article class="panel searchpanel">
             <div id="keywordBox"><label>Rule or keyword</label><div class="searchline"><input id="ruleQuery" placeholder="e.g. metagaming, combat logging..."/><button class="primary" id="ruleSearch">Search</button></div></div>
-            <div id="situationBox" hidden><label>What happened?</label><textarea id="situationQuery" placeholder="Describe the situation in your own words..."></textarea><button class="primary full" id="situationSearch">Find relevant rules</button></div>
-            <div id="ruleResults" class="results"><div class="empty">Search results will appear here. The finished version will use the current official Highlife rules rather than confidential data stored in GitHub.</div></div>
+            <div id="situationBox" hidden><label>What happened?</label><textarea id="situationQuery" placeholder="e.g. They disconnected while officers were placing them under arrest..."></textarea><button class="primary full" id="situationSearch">Find relevant rules</button></div>
+            <div id="ruleResults" class="results"><div class="empty">Search results will appear here. Live official-rule syncing will be added through the backend.</div></div>
           </article>
-          <article class="panel detail" id="ruleDetail"><div class="empty">Select a result to view the official rule and your protected internal guidance.</div></article>
+          <article class="panel detail" id="ruleDetail"><div class="empty">Select a result to view the rule match and protected guidance area.</div></article>
         </div>
       </section>
 
       <section class="page" id="comp">
-        <div class="sectionintro"><div><p class="eyebrow">COMPENSATION</p><h2>Compensation Calculator</h2><p>Add lost items and cash. Item values will come from the protected backend.</p></div><button class="secondary" id="clearComp">Clear all</button></div>
+        <div class="sectionintro"><div><p class="eyebrow">COMPENSATION</p><h2>Compensation Calculator</h2><p>Add lost items and cash. Your spreadsheet values will be loaded privately later.</p></div><button class="secondary" id="clearComp">Clear all</button></div>
         <article class="panel comp-panel">
-          <div class="notice">🔒 <span><strong>Prototype safe mode:</strong> compensation values from your spreadsheet are deliberately not embedded in this public repository.</span></div>
+          <div class="notice">🔒 <span><strong>Safe mode:</strong> the real compensation values are deliberately absent from the GitHub code.</span></div>
           <div id="compRows"></div>
           <button class="addrow" id="addComp">＋ Add another item</button>
           <div class="totals"><label>Cash lost <div class="money"><span>$</span><input id="cashLost" type="number" min="0" value="0"/></div></label><div><small>Calculated total</small><strong id="compTotal">Protected</strong></div></div>
@@ -64,36 +68,50 @@
       </section>
 
       <section class="page" id="punishment">
-        <div class="sectionintro"><div><p class="eyebrow">PRIVATE DECISION SUPPORT</p><h2>Punishment Guide</h2><p>Record the current incident, enter prior bans and calculate the useful history around them.</p></div></div>
+        <div class="sectionintro"><div><p class="eyebrow">PRIVATE DECISION SUPPORT</p><h2>Punishment Guide</h2><p>Capture the current case, prior bans and links you may need again during an appeal.</p></div><button class="secondary" id="clearCase">New blank case</button></div>
         <div class="punish-grid">
           <article class="panel formpanel">
             <h3>Current case</h3>
             <label>Player profile URL<input id="caseProfile" type="url" placeholder="Paste Highlife player profile link..."/></label>
-            <label>Offence / rule<input id="caseRule" placeholder="e.g. Metagaming"/></label>
+            <div class="two-col"><label>Offence / rule<input id="caseRule" placeholder="e.g. Metagaming"/></label><label>Case / ticket link<input id="caseLink" type="url" placeholder="Optional internal link..."/></label></div>
+            <label>Evidence link(s)<textarea id="caseEvidence" placeholder="Clip, screenshot, ticket or evidence links — one per line"></textarea></label>
             <label>Incident notes<textarea id="caseNotes" placeholder="Short summary of what happened..."></textarea></label>
+            <h3 class="subhead">Punishment issued</h3>
+            <div class="three-col"><label>Ban start<input id="currentStart" type="date"/></label><label>Ban end<input id="currentEnd" type="date"/></label><label>Length<div class="readonly" id="currentLength">—</div></label></div>
             <div class="panelhead"><h3>Prior bans</h3><button class="textbtn" id="addBan">＋ Add prior</button></div>
             <div id="banRows"></div>
           </article>
           <article class="panel summarypanel">
             <h3>History at a glance</h3>
-            <div class="stats"><div><small>Prior bans</small><b id="statBans">0</b></div><div><small>Total banned days</small><b id="statDays">0</b></div><div><small>Longest prior</small><b id="statLongest">0 days</b></div><div><small>Last ban ended</small><b id="statLast">—</b></div></div>
-            <div class="guidance"><span>🔒</span><div><strong>Internal recommendation</strong><p>The eventual recommendation, escalation guidance and confidential punishment matrix will load here only after authentication.</p></div></div>
+            <div class="stats"><div><small>Prior bans</small><b id="statBans">0</b></div><div><small>Total prior days</small><b id="statDays">0</b></div><div><small>Longest prior</small><b id="statLongest">0 days</b></div><div><small>Last ban ended</small><b id="statLast">—</b></div><div><small>Same-rule priors</small><b id="statSame">0</b></div><div><small>Bans in last 90d</small><b id="stat90">0</b></div></div>
+            <div class="guidance"><span>🔒</span><div><strong>Internal recommendation</strong><p>Your confidential base punishment, repeat-offence guidance and escalation notes will load here from the protected backend.</p></div></div>
             <button class="primary full" id="saveToPlayer">Save case to player record</button>
           </article>
         </div>
       </section>
 
       <section class="page" id="players">
-        <div class="sectionintro"><div><p class="eyebrow">PRIVATE RECORDS</p><h2>Player Records</h2><p>Use the profile URL as the stable link between punishments and appeal reviews.</p></div><button class="primary" id="newPlayer">＋ New player</button></div>
+        <div class="sectionintro"><div><p class="eyebrow">PRIVATE RECORDS</p><h2>Player Records</h2><p>The profile URL acts as the stable identifier even if a player changes their name.</p></div><button class="primary" id="newPlayer">＋ New player</button></div>
         <div class="player-layout">
-          <article class="panel"><div class="searchline"><input id="playerSearch" placeholder="Search saved player name or profile URL..."/><button class="secondary" id="playerSearchBtn">Search</button></div><div id="playerList" class="results"></div></article>
-          <article class="panel detail" id="playerDetail"><div class="empty">Select a player record to see their punishment history, notes and links.</div></article>
+          <article class="panel"><div class="searchline"><input id="playerSearch" placeholder="Search player name or profile URL..."/><button class="secondary" id="playerSearchBtn">Search</button></div><div id="playerList" class="results"></div></article>
+          <article class="panel detail" id="playerDetail"><div class="empty">Select a player record to see their punishment history, appeal history, notes and links.</div></article>
+        </div>
+      </section>
+
+      <section class="page" id="appeals">
+        <div class="sectionintro"><div><p class="eyebrow">BAN APPEAL PREP</p><h2>Appeal Review</h2><p>Find the player, choose the punishment being appealed and keep the review outcome attached to their record.</p></div></div>
+        <div class="appeal-grid">
+          <article class="panel">
+            <label>Find player<div class="searchline"><input id="appealPlayerSearch" placeholder="Player name or profile URL..."/><button class="secondary" id="appealSearchBtn">Find</button></div></label>
+            <div id="appealPlayerResults" class="results"><div class="empty compact">Search for a saved player record.</div></div>
+          </article>
+          <article class="panel" id="appealWorkspace"><div class="empty">Choose a player to begin the appeal review.</div></article>
         </div>
       </section>
     </main>
   </div>
 
-  <dialog id="playerDialog"><form method="dialog" id="playerForm"><div class="dialoghead"><div><p class="eyebrow">PLAYER RECORD</p><h2>Add player</h2></div><button value="cancel" class="iconbtn">×</button></div><label>Player name<input id="playerName" required placeholder="Current display name"/></label><label>Highlife profile URL<input id="playerProfile" required type="url" placeholder="https://..."/></label><label>Notes<textarea id="playerNotes" placeholder="Optional private notes"></textarea></label><div class="dialogactions"><button value="cancel" class="secondary">Cancel</button><button value="default" class="primary" id="savePlayer">Save record</button></div></form></dialog>
+  <dialog id="playerDialog"><form method="dialog" id="playerForm"><div class="dialoghead"><div><p class="eyebrow">PLAYER RECORD</p><h2>Add player</h2></div><button value="cancel" class="iconbtn">×</button></div><label>Player name<input id="playerName" required placeholder="Current display name"/></label><label>Highlife profile URL<input id="playerProfile" required type="url" placeholder="https://..."/></label><label>Known previous name(s)<input id="playerAliases" placeholder="Optional, comma separated"/></label><label>Notes<textarea id="playerNotes" placeholder="Optional private notes"></textarea></label><div class="dialogactions"><button value="cancel" class="secondary">Cancel</button><button value="default" class="primary" id="savePlayer">Save record</button></div></form></dialog>
 
   <script src="app.js"></script>
 </body>
