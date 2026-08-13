@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "highlife",
+  "main": "backend/worker.js",
+  "compatibility_date": "2026-08-13",
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "highlife-staff-db",
+      "database_id": "01a392a3-4be3-4e39-8bc8-43bef99bb898"
+    }
+  ]
+}
