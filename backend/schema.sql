@@ -1,0 +1,81 @@
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS players (
+  id TEXT PRIMARY KEY,
+  profile_url TEXT NOT NULL UNIQUE,
+  current_name TEXT NOT NULL,
+  previous_names TEXT NOT NULL DEFAULT '[]',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS cases (
+  id TEXT PRIMARY KEY,
+  player_id TEXT NOT NULL,
+  rule_name TEXT NOT NULL,
+  incident_notes TEXT NOT NULL DEFAULT '',
+  ban_start TEXT,
+  ban_end TEXT,
+  evidence_url TEXT,
+  ticket_url TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_cases_player_id ON cases(player_id);
+CREATE INDEX IF NOT EXISTS idx_cases_rule_name ON cases(rule_name);
+
+CREATE TABLE IF NOT EXISTS case_prior_bans (
+  id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  ban_start TEXT,
+  ban_end TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_prior_bans_case_id ON case_prior_bans(case_id);
+
+CREATE TABLE IF NOT EXISTS appeals (
+  id TEXT PRIMARY KEY,
+  player_id TEXT NOT NULL,
+  case_id TEXT,
+  appeal_url TEXT,
+  notes TEXT NOT NULL DEFAULT '',
+  outcome TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE,
+  FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_appeals_player_id ON appeals(player_id);
+
+CREATE TABLE IF NOT EXISTS compensation_items (
+  id TEXT PRIMARY KEY,
+  item_name TEXT NOT NULL UNIQUE,
+  unit_value INTEGER NOT NULL CHECK (unit_value >= 0),
+  active INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_compensation_item_name ON compensation_items(item_name);
+
+CREATE TABLE IF NOT EXISTS punishment_guidance (
+  id TEXT PRIMARY KEY,
+  rule_key TEXT NOT NULL UNIQUE,
+  rule_name TEXT NOT NULL,
+  base_guidance TEXT NOT NULL DEFAULT '',
+  repeat_guidance TEXT NOT NULL DEFAULT '',
+  escalation_notes TEXT NOT NULL DEFAULT '',
+  considerations TEXT NOT NULL DEFAULT '[]',
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
