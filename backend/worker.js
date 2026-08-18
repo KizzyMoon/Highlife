@@ -11,172 +11,29 @@ function cors(origin) {
     'Content-Type': 'application/json; charset=utf-8'
   };
 }
+function json(data,status=200,origin=ORIGIN){return new Response(JSON.stringify(data),{status,headers:cors(origin)})}
+function b64url(bytes){let s='';const u8=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);for(const b of u8)s+=String.fromCharCode(b);return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/g,'')}
+async function signSession(secret,payload){const enc=new TextEncoder();const body=b64url(enc.encode(JSON.stringify(payload)));const key=await crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);const sig=await crypto.subtle.sign('HMAC',key,enc.encode(body));return `${body}.${b64url(sig)}`}
+async function verifySession(secret,token){try{const [body,sig]=token.split('.');if(!body||!sig)return null;const enc=new TextEncoder();const key=await crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);const expected=b64url(await crypto.subtle.sign('HMAC',key,enc.encode(body)));if(expected!==sig)return null;const padded=body.replace(/-/g,'+').replace(/_/g,'/')+'==='.slice((body.length+3)%4);const payload=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(padded),c=>c.charCodeAt(0))));if(!payload.exp||Date.now()>payload.exp)return null;return payload}catch{return null}}
+function bearer(req){const h=req.headers.get('Authorization')||'';return h.startsWith('Bearer ')?h.slice(7):''}
+async function requireAuth(req,env){if(!env.SESSION_SECRET)return null;return verifySession(env.SESSION_SECRET,bearer(req))}
+function id(){return crypto.randomUUID()}
+function daysBetween(start,end){if(!start||!end)return 0;const a=new Date(`${start}T12:00:00Z`),b=new Date(`${end}T12:00:00Z`);return Math.max(0,Math.round((b-a)/86400000))}
 
-function json(data, status = 200, origin = ORIGIN) {
-  return new Response(JSON.stringify(data), { status, headers: cors(origin) });
-}
+export default {async fetch(req,env){const origin=req.headers.get('Origin')||ORIGIN,url=new URL(req.url);if(req.method==='OPTIONS')return new Response(null,{status:204,headers:cors(origin)});try{
+if(url.pathname==='/health')return json({ok:true},200,origin);
+if(url.pathname==='/auth/login'&&req.method==='POST'){const {password=''}=await req.json();if(!env.ADMIN_PASSWORD||!env.SESSION_SECRET)return json({error:'Server secrets not configured'},503,origin);if(password!==env.ADMIN_PASSWORD)return json({error:'Invalid login'},401,origin);const token=await signSession(env.SESSION_SECRET,{sub:'kizzy',exp:Date.now()+1000*60*60*24*30});return json({token},200,origin)}
+const session=await requireAuth(req,env);if(!session)return json({error:'Unauthorized'},401,origin);
 
-function b64url(bytes) {
-  let s = '';
-  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  for (const b of u8) s += String.fromCharCode(b);
-  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-}
+if(url.pathname==='/players'&&req.method==='GET'){const q=(url.searchParams.get('q')||'').trim();const stmt=q?env.DB.prepare(`SELECT p.*, COUNT(c.id) AS case_count FROM players p LEFT JOIN cases c ON c.player_id=p.id WHERE p.current_name LIKE ? OR p.profile_url LIKE ? GROUP BY p.id ORDER BY p.updated_at DESC`).bind(`%${q}%`,`%${q}%`):env.DB.prepare(`SELECT p.*, COUNT(c.id) AS case_count FROM players p LEFT JOIN cases c ON c.player_id=p.id GROUP BY p.id ORDER BY p.updated_at DESC`);const {results}=await stmt.all();return json({players:results},200,origin)}
+if(url.pathname==='/players'&&req.method==='POST'){const body=await req.json();if(!body.current_name||!body.profile_url)return json({error:'current_name and profile_url are required'},400,origin);const playerId=id();await env.DB.prepare(`INSERT INTO players (id, profile_url, current_name, previous_names, notes) VALUES (?, ?, ?, ?, ?)`).bind(playerId,body.profile_url.trim(),body.current_name.trim(),JSON.stringify(body.previous_names||[]),body.notes||'').run();return json({id:playerId},201,origin)}
+const playerMatch=url.pathname.match(/^\/players\/([^/]+)$/);if(playerMatch&&req.method==='GET'){const playerId=playerMatch[1];const player=await env.DB.prepare(`SELECT * FROM players WHERE id=?`).bind(playerId).first();if(!player)return json({error:'Player not found'},404,origin);const {results:cases}=await env.DB.prepare(`SELECT * FROM cases WHERE player_id=? ORDER BY created_at DESC`).bind(playerId).all();for(const c of cases){const {results:priors}=await env.DB.prepare(`SELECT * FROM case_prior_bans WHERE case_id=? ORDER BY ban_end DESC`).bind(c.id).all();c.prior_bans=priors.map(p=>({...p,duration_days:daysBetween(p.ban_start,p.ban_end)}));c.duration_days=daysBetween(c.ban_start,c.ban_end)}const {results:appeals}=await env.DB.prepare(`SELECT * FROM appeals WHERE player_id=? ORDER BY created_at DESC`).bind(playerId).all();return json({player,cases,appeals},200,origin)}
+if(url.pathname==='/cases'&&req.method==='POST'){const body=await req.json();if(!body.player_id||!body.rule_name)return json({error:'player_id and rule_name are required'},400,origin);const caseId=id();await env.DB.prepare(`INSERT INTO cases (id, player_id, rule_name, incident_notes, ban_start, ban_end, evidence_url, ticket_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).bind(caseId,body.player_id,body.rule_name,body.incident_notes||'',body.ban_start||null,body.ban_end||null,body.evidence_url||null,body.ticket_url||null).run();for(const p of body.prior_bans||[]){await env.DB.prepare(`INSERT INTO case_prior_bans (id, case_id, reason, ban_start, ban_end) VALUES (?, ?, ?, ?, ?)`).bind(id(),caseId,p.reason||'',p.ban_start||null,p.ban_end||null).run()}await env.DB.prepare(`UPDATE players SET updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(body.player_id).run();return json({id:caseId},201,origin)}
+if(url.pathname==='/appeals'&&req.method==='POST'){const body=await req.json();if(!body.player_id)return json({error:'player_id is required'},400,origin);const appealId=id();await env.DB.prepare(`INSERT INTO appeals (id, player_id, case_id, appeal_url, notes, outcome) VALUES (?, ?, ?, ?, ?, ?)`).bind(appealId,body.player_id,body.case_id||null,body.appeal_url||null,body.notes||'',body.outcome||'pending').run();return json({id:appealId},201,origin)}
 
-async function signSession(secret, payload) {
-  const enc = new TextEncoder();
-  const body = b64url(enc.encode(JSON.stringify(payload)));
-  const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(body));
-  return `${body}.${b64url(sig)}`;
-}
+if(url.pathname==='/compensation/items'&&req.method==='GET'){const q=(url.searchParams.get('q')||'').trim();const stmt=q?env.DB.prepare(`SELECT id, item_name FROM compensation_items WHERE active=1 AND item_name LIKE ? ORDER BY item_name LIMIT 50`).bind(`%${q}%`):env.DB.prepare(`SELECT id, item_name FROM compensation_items WHERE active=1 ORDER BY item_name LIMIT 200`);const {results}=await stmt.all();return json({items:results},200,origin)}
+if(url.pathname==='/compensation/calculate'&&req.method==='POST'){const body=await req.json();let total=Math.max(0,Number(body.cash_lost||0));const lines=[];for(const row of body.items||[]){const item=await env.DB.prepare(`SELECT item_name, unit_value FROM compensation_items WHERE id=? AND active=1`).bind(row.id).first();if(!item)continue;const qty=Math.max(1,Number(row.quantity||1)),subtotal=item.unit_value*qty;total+=subtotal;lines.push({item_name:item.item_name,quantity:qty,unit_value:item.unit_value,subtotal})}return json({total,lines},200,origin)}
+if(url.pathname==='/admin/compensation/import'&&req.method==='POST'){const body=await req.json();if(!Array.isArray(body.items)||!body.items.length)return json({error:'items array is required'},400,origin);const clean=[];const seen=new Set();for(const row of body.items){const name=String(row.item_name||'').trim(),value=Number(row.unit_value);if(!name||!Number.isFinite(value)||value<0||seen.has(name))continue;seen.add(name);clean.push({name,value:Math.round(value)})}if(!clean.length)return json({error:'No valid items supplied'},400,origin);await env.DB.prepare(`DELETE FROM compensation_items`).run();for(const row of clean){await env.DB.prepare(`INSERT INTO compensation_items (id,item_name,unit_value,active) VALUES (?,?,?,1)`).bind(id(),row.name,row.value).run()}return json({ok:true,imported:clean.length},200,origin)}
 
-async function verifySession(secret, token) {
-  try {
-    const [body, sig] = token.split('.');
-    if (!body || !sig) return null;
-    const enc = new TextEncoder();
-    const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-    const expected = b64url(await crypto.subtle.sign('HMAC', key, enc.encode(body)));
-    if (expected !== sig) return null;
-    const padded = body.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((body.length + 3) % 4);
-    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(padded), c => c.charCodeAt(0))));
-    if (!payload.exp || Date.now() > payload.exp) return null;
-    return payload;
-  } catch {
-    return null;
-  }
-}
-
-function bearer(req) {
-  const h = req.headers.get('Authorization') || '';
-  return h.startsWith('Bearer ') ? h.slice(7) : '';
-}
-
-async function requireAuth(req, env) {
-  if (!env.SESSION_SECRET) return null;
-  return verifySession(env.SESSION_SECRET, bearer(req));
-}
-
-function id() { return crypto.randomUUID(); }
-
-function daysBetween(start, end) {
-  if (!start || !end) return 0;
-  const a = new Date(`${start}T12:00:00Z`);
-  const b = new Date(`${end}T12:00:00Z`);
-  return Math.max(0, Math.round((b - a) / 86400000));
-}
-
-export default {
-  async fetch(req, env) {
-    const origin = req.headers.get('Origin') || ORIGIN;
-    const url = new URL(req.url);
-    if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(origin) });
-
-    try {
-      if (url.pathname === '/health') return json({ ok: true }, 200, origin);
-
-      if (url.pathname === '/auth/login' && req.method === 'POST') {
-        const { password = '' } = await req.json();
-        if (!env.ADMIN_PASSWORD || !env.SESSION_SECRET) return json({ error: 'Server secrets not configured' }, 503, origin);
-        if (password !== env.ADMIN_PASSWORD) return json({ error: 'Invalid login' }, 401, origin);
-        const token = await signSession(env.SESSION_SECRET, { sub: 'kizzy', exp: Date.now() + 1000 * 60 * 60 * 24 * 30 });
-        return json({ token }, 200, origin);
-      }
-
-      const session = await requireAuth(req, env);
-      if (!session) return json({ error: 'Unauthorized' }, 401, origin);
-
-      if (url.pathname === '/players' && req.method === 'GET') {
-        const q = (url.searchParams.get('q') || '').trim();
-        const stmt = q
-          ? env.DB.prepare(`SELECT p.*, COUNT(c.id) AS case_count FROM players p LEFT JOIN cases c ON c.player_id=p.id WHERE p.current_name LIKE ? OR p.profile_url LIKE ? GROUP BY p.id ORDER BY p.updated_at DESC`).bind(`%${q}%`, `%${q}%`)
-          : env.DB.prepare(`SELECT p.*, COUNT(c.id) AS case_count FROM players p LEFT JOIN cases c ON c.player_id=p.id GROUP BY p.id ORDER BY p.updated_at DESC`);
-        const { results } = await stmt.all();
-        return json({ players: results }, 200, origin);
-      }
-
-      if (url.pathname === '/players' && req.method === 'POST') {
-        const body = await req.json();
-        if (!body.current_name || !body.profile_url) return json({ error: 'current_name and profile_url are required' }, 400, origin);
-        const playerId = id();
-        await env.DB.prepare(`INSERT INTO players (id, profile_url, current_name, previous_names, notes) VALUES (?, ?, ?, ?, ?)`)
-          .bind(playerId, body.profile_url.trim(), body.current_name.trim(), JSON.stringify(body.previous_names || []), body.notes || '').run();
-        return json({ id: playerId }, 201, origin);
-      }
-
-      const playerMatch = url.pathname.match(/^\/players\/([^/]+)$/);
-      if (playerMatch && req.method === 'GET') {
-        const playerId = playerMatch[1];
-        const player = await env.DB.prepare(`SELECT * FROM players WHERE id=?`).bind(playerId).first();
-        if (!player) return json({ error: 'Player not found' }, 404, origin);
-        const { results: cases } = await env.DB.prepare(`SELECT * FROM cases WHERE player_id=? ORDER BY created_at DESC`).bind(playerId).all();
-        for (const c of cases) {
-          const { results: priors } = await env.DB.prepare(`SELECT * FROM case_prior_bans WHERE case_id=? ORDER BY ban_end DESC`).bind(c.id).all();
-          c.prior_bans = priors.map(p => ({ ...p, duration_days: daysBetween(p.ban_start, p.ban_end) }));
-          c.duration_days = daysBetween(c.ban_start, c.ban_end);
-        }
-        const { results: appeals } = await env.DB.prepare(`SELECT * FROM appeals WHERE player_id=? ORDER BY created_at DESC`).bind(playerId).all();
-        return json({ player, cases, appeals }, 200, origin);
-      }
-
-      if (url.pathname === '/cases' && req.method === 'POST') {
-        const body = await req.json();
-        if (!body.player_id || !body.rule_name) return json({ error: 'player_id and rule_name are required' }, 400, origin);
-        const caseId = id();
-        await env.DB.prepare(`INSERT INTO cases (id, player_id, rule_name, incident_notes, ban_start, ban_end, evidence_url, ticket_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-          .bind(caseId, body.player_id, body.rule_name, body.incident_notes || '', body.ban_start || null, body.ban_end || null, body.evidence_url || null, body.ticket_url || null).run();
-        for (const p of body.prior_bans || []) {
-          await env.DB.prepare(`INSERT INTO case_prior_bans (id, case_id, reason, ban_start, ban_end) VALUES (?, ?, ?, ?, ?)`)
-            .bind(id(), caseId, p.reason || '', p.ban_start || null, p.ban_end || null).run();
-        }
-        await env.DB.prepare(`UPDATE players SET updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(body.player_id).run();
-        return json({ id: caseId }, 201, origin);
-      }
-
-      if (url.pathname === '/appeals' && req.method === 'POST') {
-        const body = await req.json();
-        if (!body.player_id) return json({ error: 'player_id is required' }, 400, origin);
-        const appealId = id();
-        await env.DB.prepare(`INSERT INTO appeals (id, player_id, case_id, appeal_url, notes, outcome) VALUES (?, ?, ?, ?, ?, ?)`)
-          .bind(appealId, body.player_id, body.case_id || null, body.appeal_url || null, body.notes || '', body.outcome || 'pending').run();
-        return json({ id: appealId }, 201, origin);
-      }
-
-      if (url.pathname === '/compensation/items' && req.method === 'GET') {
-        const q = (url.searchParams.get('q') || '').trim();
-        const stmt = q
-          ? env.DB.prepare(`SELECT id, item_name FROM compensation_items WHERE active=1 AND item_name LIKE ? ORDER BY item_name LIMIT 30`).bind(`%${q}%`)
-          : env.DB.prepare(`SELECT id, item_name FROM compensation_items WHERE active=1 ORDER BY item_name LIMIT 30`);
-        const { results } = await stmt.all();
-        return json({ items: results }, 200, origin);
-      }
-
-      if (url.pathname === '/compensation/calculate' && req.method === 'POST') {
-        const body = await req.json();
-        let total = Math.max(0, Number(body.cash_lost || 0));
-        const lines = [];
-        for (const row of body.items || []) {
-          const item = await env.DB.prepare(`SELECT item_name, unit_value FROM compensation_items WHERE id=? AND active=1`).bind(row.id).first();
-          if (!item) continue;
-          const qty = Math.max(1, Number(row.quantity || 1));
-          const subtotal = item.unit_value * qty;
-          total += subtotal;
-          lines.push({ item_name: item.item_name, quantity: qty, subtotal });
-        }
-        return json({ total, lines }, 200, origin);
-      }
-
-      const guideMatch = url.pathname.match(/^\/guidance\/(.+)$/);
-      if (guideMatch && req.method === 'GET') {
-        const ruleKey = decodeURIComponent(guideMatch[1]);
-        const guidance = await env.DB.prepare(`SELECT * FROM punishment_guidance WHERE rule_key=?`).bind(ruleKey).first();
-        return json({ guidance: guidance || null }, 200, origin);
-      }
-
-      return json({ error: 'Not found' }, 404, origin);
-    } catch (err) {
-      return json({ error: 'Server error', detail: String(err?.message || err) }, 500, origin);
-    }
-  }
-};
+const guideMatch=url.pathname.match(/^\/guidance\/(.+)$/);if(guideMatch&&req.method==='GET'){const ruleKey=decodeURIComponent(guideMatch[1]);const guidance=await env.DB.prepare(`SELECT * FROM punishment_guidance WHERE rule_key=?`).bind(ruleKey).first();return json({guidance:guidance||null},200,origin)}
+return json({error:'Not found'},404,origin)}catch(err){return json({error:'Server error',detail:String(err?.message||err)},500,origin)}}};
