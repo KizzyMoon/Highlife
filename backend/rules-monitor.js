@@ -1,0 +1,71 @@
+const RULES_URL='https://highliferoleplay.net/rules';
+const VISIBLE_DAYS=14;
+
+function decodeHtml(s=''){return s.replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&quot;/gi,'"').replace(/&#39;|&apos;/gi,"'").replace(/&lt;/gi,'<').replace(/&gt;/gi,'>').replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(Number(n)))}
+function normaliseHtml(html=''){
+  let s=html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ')
+    .replace(/<\/(?:p|li|h1|h2|h3|h4|section|article|div|br|tr)>/gi,'\n')
+    .replace(/<br\s*\/?>/gi,'\n')
+    .replace(/<[^>]+>/g,' ');
+  s=decodeHtml(s).replace(/\r/g,'').replace(/[\t ]+/g,' ').replace(/\n[ \t]+/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+  const start=s.toLowerCase().indexOf("these are highlife's rules");
+  const alt=start<0?s.toLowerCase().indexOf('roleplay words and definitions'):start;
+  if(alt>=0)s=s.slice(alt);
+  const end=s.toLowerCase().indexOf('© highlife roleplay');
+  if(end>0)s=s.slice(0,end);
+  return s.trim();
+}
+function meaningfulLines(text=''){
+  return text.split(/\n+/).map(x=>x.trim()).filter(x=>x.length>=18&&!/^server status$/i.test(x)&&!/^community$/i.test(x)&&!/^legal & info$/i.test(x));
+}
+function diffSummary(oldText,newText){
+  const oldLines=meaningfulLines(oldText),newLines=meaningfulLines(newText),oldSet=new Set(oldLines),newSet=new Set(newLines);
+  const added=newLines.filter(x=>!oldSet.has(x)).slice(0,5).map(x=>x.slice(0,240));
+  const removed=oldLines.filter(x=>!newSet.has(x)).slice(0,5).map(x=>x.slice(0,240));
+  return {added,removed};
+}
+async function hashText(text){const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));return [...new Uint8Array(d)].map(b=>b.toString(16).padStart(2,'0')).join('')}
+async function ensureTables(env){
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS rules_monitor_state (id INTEGER PRIMARY KEY CHECK(id=1), content_hash TEXT NOT NULL, content_text TEXT NOT NULL, source_updated_at TEXT, checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS rules_updates (id TEXT PRIMARY KEY, detected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, source_updated_at TEXT, summary_json TEXT NOT NULL, content_hash TEXT NOT NULL)`).run();
+  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_rules_updates_detected ON rules_updates(detected_at DESC)`).run();
+}
+async function fetchRules(){
+  const res=await fetch(RULES_URL,{headers:{'User-Agent':'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)','Accept':'text/html,application/xhtml+xml'}});
+  if(!res.ok)throw new Error(`Rules page returned ${res.status}`);
+  const html=await res.text();
+  const text=normaliseHtml(html);
+  if(text.length<1000||!/roleplay|server rules|in-game rules/i.test(text))throw new Error('Rules page did not return readable rule content');
+  const m=text.match(/Last Updated:\s*([^\n]+?)(?:\s*\(DD\/MM\/YYYY\))?(?:\n|$)/i);
+  return {text,sourceUpdated:m?m[1].trim():null};
+}
+export async function checkRules(env){
+  await ensureTables(env);
+  const {text,sourceUpdated}=await fetchRules();
+  const hash=await hashText(text);
+  const prev=await env.DB.prepare(`SELECT * FROM rules_monitor_state WHERE id=1`).first();
+  if(!prev){
+    await env.DB.prepare(`INSERT INTO rules_monitor_state (id,content_hash,content_text,source_updated_at,checked_at) VALUES (1,?,?,?,?,CURRENT_TIMESTAMP)`).bind(hash,text,sourceUpdated).run();
+    return {ok:true,changed:false,baseline:true,source_updated_at:sourceUpdated};
+  }
+  if(prev.content_hash===hash){
+    await env.DB.prepare(`UPDATE rules_monitor_state SET source_updated_at=?, checked_at=CURRENT_TIMESTAMP WHERE id=1`).bind(sourceUpdated).run();
+    return {ok:true,changed:false,source_updated_at:sourceUpdated};
+  }
+  const summary=diffSummary(prev.content_text,text);
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO rules_updates (id,source_updated_at,summary_json,content_hash) VALUES (?,?,?,?)`).bind(crypto.randomUUID(),sourceUpdated,JSON.stringify(summary),hash),
+    env.DB.prepare(`UPDATE rules_monitor_state SET content_hash=?,content_text=?,source_updated_at=?,checked_at=CURRENT_TIMESTAMP WHERE id=1`).bind(hash,text,sourceUpdated)
+  ]);
+  return {ok:true,changed:true,source_updated_at:sourceUpdated,summary};
+}
+export async function latestRuleUpdate(env){
+  await ensureTables(env);
+  const row=await env.DB.prepare(`SELECT * FROM rules_updates WHERE detected_at >= datetime('now', ?) ORDER BY detected_at DESC LIMIT 1`).bind(`-${VISIBLE_DAYS} days`).first();
+  const state=await env.DB.prepare(`SELECT source_updated_at,checked_at FROM rules_monitor_state WHERE id=1`).first();
+  if(!row)return {update:null,last_checked:state?.checked_at||null,source_updated_at:state?.source_updated_at||null};
+  let summary={added:[],removed:[]};try{summary=JSON.parse(row.summary_json||'{}')}catch{}
+  return {update:{id:row.id,detected_at:row.detected_at,source_updated_at:row.source_updated_at,added:summary.added||[],removed:summary.removed||[],source_url:RULES_URL},last_checked:state?.checked_at||null,source_updated_at:state?.source_updated_at||null};
+}
