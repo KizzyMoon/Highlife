@@ -1,3 +1,5 @@
+import {checkRules,latestRuleUpdate} from './rules-monitor.js';
+
 const ORIGIN = 'https://kizzymoon.github.io';
 
 function cors(origin) {
@@ -20,10 +22,14 @@ async function requireAuth(req,env){if(!env.SESSION_SECRET)return null;return ve
 function id(){return crypto.randomUUID()}
 function daysBetween(start,end){if(!start||!end)return 0;const a=new Date(`${start}T12:00:00Z`),b=new Date(`${end}T12:00:00Z`);return Math.max(0,Math.round((b-a)/86400000))}
 
-export default {async fetch(req,env){const origin=req.headers.get('Origin')||ORIGIN,url=new URL(req.url);if(req.method==='OPTIONS')return new Response(null,{status:204,headers:cors(origin)});try{
+const worker={
+async fetch(req,env){const origin=req.headers.get('Origin')||ORIGIN,url=new URL(req.url);if(req.method==='OPTIONS')return new Response(null,{status:204,headers:cors(origin)});try{
 if(url.pathname==='/health')return json({ok:true},200,origin);
 if(url.pathname==='/auth/login'&&req.method==='POST'){const {password=''}=await req.json();if(!env.ADMIN_PASSWORD||!env.SESSION_SECRET)return json({error:'Server secrets not configured'},503,origin);if(password!==env.ADMIN_PASSWORD)return json({error:'Invalid login'},401,origin);const token=await signSession(env.SESSION_SECRET,{sub:'kizzy',exp:Date.now()+1000*60*60*24*30});return json({token},200,origin)}
 const session=await requireAuth(req,env);if(!session)return json({error:'Unauthorized'},401,origin);
+
+if(url.pathname==='/rules/status'&&req.method==='GET')return json(await latestRuleUpdate(env),200,origin);
+if(url.pathname==='/rules/check'&&req.method==='POST'){const result=await checkRules(env);return json(result,200,origin)}
 
 if(url.pathname==='/players'&&req.method==='GET'){const q=(url.searchParams.get('q')||'').trim();const stmt=q?env.DB.prepare(`SELECT p.*, COUNT(c.id) AS case_count FROM players p LEFT JOIN cases c ON c.player_id=p.id WHERE p.current_name LIKE ? OR p.profile_url LIKE ? GROUP BY p.id ORDER BY p.updated_at DESC`).bind(`%${q}%`,`%${q}%`):env.DB.prepare(`SELECT p.*, COUNT(c.id) AS case_count FROM players p LEFT JOIN cases c ON c.player_id=p.id GROUP BY p.id ORDER BY p.updated_at DESC`);const {results}=await stmt.all();return json({players:results},200,origin)}
 if(url.pathname==='/players'&&req.method==='POST'){const body=await req.json();if(!body.current_name||!body.profile_url)return json({error:'current_name and profile_url are required'},400,origin);const playerId=id();await env.DB.prepare(`INSERT INTO players (id, profile_url, current_name, previous_names, notes) VALUES (?, ?, ?, ?, ?)`).bind(playerId,body.profile_url.trim(),body.current_name.trim(),JSON.stringify(body.previous_names||[]),body.notes||'').run();return json({id:playerId},201,origin)}
@@ -36,4 +42,8 @@ if(url.pathname==='/compensation/calculate'&&req.method==='POST'){const body=awa
 if(url.pathname==='/admin/compensation/import'&&req.method==='POST'){const body=await req.json();if(!Array.isArray(body.items)||!body.items.length)return json({error:'items array is required'},400,origin);const clean=[];const seen=new Set();for(const row of body.items){const name=String(row.item_name||'').trim(),value=Number(row.unit_value);if(!name||!Number.isFinite(value)||value<0||seen.has(name))continue;seen.add(name);clean.push({name,value:Math.round(value)})}if(!clean.length)return json({error:'No valid items supplied'},400,origin);await env.DB.prepare(`DELETE FROM compensation_items`).run();for(const row of clean){await env.DB.prepare(`INSERT INTO compensation_items (id,item_name,unit_value,active) VALUES (?,?,?,1)`).bind(id(),row.name,row.value).run()}return json({ok:true,imported:clean.length},200,origin)}
 
 const guideMatch=url.pathname.match(/^\/guidance\/(.+)$/);if(guideMatch&&req.method==='GET'){const ruleKey=decodeURIComponent(guideMatch[1]);const guidance=await env.DB.prepare(`SELECT * FROM punishment_guidance WHERE rule_key=?`).bind(ruleKey).first();return json({guidance:guidance||null},200,origin)}
-return json({error:'Not found'},404,origin)}catch(err){return json({error:'Server error',detail:String(err?.message||err)},500,origin)}}};
+return json({error:'Not found'},404,origin)}catch(err){return json({error:'Server error',detail:String(err?.message||err)},500,origin)}},
+async scheduled(_event,env,ctx){ctx.waitUntil(checkRules(env).catch(err=>console.error('Rules monitor failed',err)))}
+};
+
+export default worker;
